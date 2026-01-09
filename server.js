@@ -3,6 +3,7 @@ const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+const resetDb = require('./scripts/reset-db');
 
 const UPLOADS = path.join(__dirname, 'uploads');
 const DB_FILE = path.join(__dirname, 'db.json');
@@ -141,4 +142,22 @@ app.post('/api/games/reset', (req, res) => {
 	res.json({ ok: true });
 });
 
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+(async function start() {
+	app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+
+	// Only reset DB when explicitly requested:
+	const shouldReset =
+		process.env.RESET_DB === '1' || process.env.RESET_DB === 'true' || process.argv.includes('--reset-db');
+
+	if (shouldReset) {
+		console.log('RESET_DB detected: performing DB reset (explicit).');
+		try {
+			await resetDb();
+			console.log('DB reset complete.');
+		} catch (err) {
+			console.error('DB reset failed:', err);
+		}
+	} else {
+		console.log('Skipping DB reset on startup. To reset manually: `npm run reset-db` or start with `RESET_DB=1` or `node server.js --reset-db`.');
+	}
+})();

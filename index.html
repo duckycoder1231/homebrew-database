@@ -69,7 +69,8 @@
 				<span class="small">ROM file (required)</span>
 			</label>
 			<!-- publish immediately option (admin only) -->
-			<label style="display:inline-flex; align-items:center; gap:8px;">
+			<!-- hidden for non-admins; updateAdminUI toggles display -->
+			<label id="publishNowLabel" style="display:none; align-items:center; gap:8px;">
 				<input id="publishNow" type="checkbox" title="Publish immediately (admin only)">
 				<span class="small">Publish now</span>
 			</label>
@@ -82,6 +83,11 @@
 			<button id="addCancel" type="button">Cancel</button>
 		</div>
 	</form>
+
+	<!-- Pending submissions: admin-only grouped view -->
+	<section id="pendingSection" class="results hidden" aria-live="polite" style="margin-top:12px;">
+		<div class="small"><strong>Pending submissions</strong></div>
+	</section>
 
 	<section id="results" class="results" aria-live="polite"></section>
 
@@ -129,11 +135,15 @@
 		isAdmin = !!localStorage.getItem('adminToken');
 		document.getElementById('adminBtn').textContent = isAdmin ? 'Logout admin' : 'Admin login';
 		document.getElementById('adminStatus').textContent = isAdmin ? ' (admin)' : '';
-		// enable publishNow checkbox only for admin
+		// show/hide publishNow option (admins only)
 		el.publishNow = document.getElementById('publishNow');
-		if (el.publishNow) el.publishNow.disabled = !isAdmin;
+		const publishLabel = document.getElementById('publishNowLabel');
+		if (publishLabel) publishLabel.style.display = isAdmin ? 'inline-flex' : 'none';
 		// hide Add toggle for non-admins? We allow submissions from non-admins but they are pending.
 		el.addToggle.textContent = isAdmin ? 'Add entry' : 'Submit entry';
+		// show/hide pending submissions group
+		const pendingSection = document.getElementById('pendingSection');
+		if (pendingSection) pendingSection.classList.toggle('hidden', !isAdmin);
 	}
 
 	// fetch list from server (server supports filtering)
@@ -159,39 +169,25 @@
 	// render uses server-provided metadata; file downloads use /api/games/:id/file
 	function renderResults() {
 		el.results.innerHTML = '';
-		// show only approved entries to non-admins
-		const visible = db.slice().filter(it => isAdmin || it.status === 'approved').sort((a,b)=> (b.year||0)-(a.year||0));
-		el.resultCount.textContent = visible.length;
-		if (!visible.length) { el.results.innerHTML = '<div class="small">No results.</div>'; return; }
-		visible.forEach(it => {
+		// approved entries shown to everyone
+		const approved = db.slice().filter(it => it.status === 'approved').sort((a,b)=> (b.year||0)-(a.year||0));
+		el.resultCount.textContent = approved.length;
+		if (!approved.length) { el.results.innerHTML = '<div class="small">No results.</div>'; }
+		approved.forEach(it => {
 			const div = document.createElement('div'); div.className = 'card';
-			const downloadLink = (it.fileName && (isAdmin || it.status === 'approved'))
-				? `<a href="/api/games/${it.id}/file" download="${encodeURIComponent(it.fileName)}">Download</a>`
-				: (it.downloadUrl && (isAdmin || it.status === 'approved') ? `<a href="${escapeAttr(it.downloadUrl)}" target="_blank">Download</a>` : '');
-			const statusBadge = it.status && it.status !== 'approved' ? `<span class="small" style="margin-left:8px;color:#b66">${escapeHtml(it.status)}</span>` : '';
-			let actions = '';
-			if (isAdmin) {
-				// admin sees control buttons for pending/approved
-				if (it.status === 'pending') {
-					actions += `<button data-id="${it.id}" class="approveBtn">Approve</button>`;
-					actions += `<button data-id="${it.id}" class="rejectBtn">Reject</button>`;
-				}
-				actions += `<button data-id="${it.id}" class="delBtn">Delete</button>`;
-			} else {
-				// non-admin: no delete; show nothing special
-			}
+			const downloadLink = it.fileName ? `<a href="/api/games/${it.id}/file" download="${encodeURIComponent(it.fileName)}">Download</a>` : (it.downloadUrl ? `<a href="${escapeAttr(it.downloadUrl)}" target="_blank">Download</a>` : '');
 			div.innerHTML = `
-				<div><strong>${escapeHtml(it.title)}</strong>${statusBadge}</div>
+				<div><strong>${escapeHtml(it.title)}</strong></div>
 				<div class="meta">${escapeHtml(it.console)} • ${it.year || 'n/a'} • ${escapeHtml(it.developer || '')}</div>
 				<div class="small" style="margin-top:8px">${escapeHtml(it.description || '')}</div>
 				<div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
 					${downloadLink}
-					${actions}
 				</div>
 			`;
 			el.results.appendChild(div);
 		});
-		// attach admin-only handlers
+		// admin-only actions (delete/confirm/reject live in pending group)
+		// attach delete handlers for approved items (admins)
 		document.querySelectorAll('.delBtn').forEach(b => {
 			b.addEventListener('click', async ev => {
 				if (!isAdmin) { alert('Only admin can delete entries.'); return; }
@@ -202,12 +198,40 @@
 				await fetchGames();
 			});
 		});
-		document.querySelectorAll('.approveBtn').forEach(b => {
+		// render pending group (admins only)
+		renderPending();
+	}
+
+	function renderPending() {
+		const pendingEl = document.getElementById('pendingSection');
+		if (!pendingEl) return;
+		if (!isAdmin) { pendingEl.classList.add('hidden'); return; }
+		const pending = db.slice().filter(it => it.status === 'pending').sort((a,b)=> (b.year||0)-(a.year||0));
+		if (!pending.length) { pendingEl.innerHTML = '<div class="small">No pending submissions.</div>'; pendingEl.classList.remove('hidden'); return; }
+		pendingEl.innerHTML = '';
+		pending.forEach(it => {
+			const div = document.createElement('div'); div.className = 'card';
+			const downloadLink = it.fileName ? `<a href="/api/games/${it.id}/file" download="${encodeURIComponent(it.fileName)}">Download</a>` : (it.downloadUrl ? `<a href="${escapeAttr(it.downloadUrl)}" target="_blank">Download</a>` : '');
+			div.innerHTML = `
+				<div><strong>${escapeHtml(it.title)}</strong><span class="small" style="margin-left:8px;color:#b66">pending</span></div>
+				<div class="meta">${escapeHtml(it.console)} • ${it.year || 'n/a'} • ${escapeHtml(it.developer || '')}</div>
+				<div class="small" style="margin-top:8px">${escapeHtml(it.description || '')}</div>
+				<div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+					${downloadLink}
+					<button data-id="${it.id}" class="confirmBtn">Confirm</button>
+					<button data-id="${it.id}" class="rejectBtn">Reject</button>
+					<button data-id="${it.id}" class="delBtn">Delete</button>
+				</div>
+			`;
+			pendingEl.appendChild(div);
+		});
+		// attach pending handlers
+		document.querySelectorAll('.confirmBtn').forEach(b => {
 			b.addEventListener('click', async ev => {
-				if (!isAdmin) { alert('Only admin can approve entries.'); return; }
+				if (!isAdmin) { alert('Only admin can confirm entries.'); return; }
 				const id = Number(ev.currentTarget.dataset.id);
 				const res = await fetch(`/api/games/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'approved' }) });
-				if (!res.ok) { alert('Approve failed'); return; }
+				if (!res.ok) { alert('Confirm failed'); return; }
 				await fetchGames();
 			});
 		});
@@ -216,9 +240,18 @@
 				if (!isAdmin) { alert('Only admin can reject entries.'); return; }
 				const id = Number(ev.currentTarget.dataset.id);
 				if (!confirm('Reject (remove) this pending entry?')) return;
-				// mark as rejected (server may delete instead)
 				const res = await fetch(`/api/games/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'rejected' }) });
 				if (!res.ok) { alert('Reject failed'); return; }
+				await fetchGames();
+			});
+		});
+		document.querySelectorAll('#pendingSection .delBtn').forEach(b => {
+			b.addEventListener('click', async ev => {
+				if (!isAdmin) { alert('Only admin can delete entries.'); return; }
+				const id = Number(ev.currentTarget.dataset.id);
+				if (!confirm('Delete this entry?')) return;
+				const res = await fetch(`/api/games/${id}`, { method: 'DELETE' });
+				if (!res.ok) { alert('Delete failed'); return; }
 				await fetchGames();
 			});
 		});
