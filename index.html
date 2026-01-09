@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Homebrew ROM Database</title>
+<style>
+	/* ...existing code... */
+	body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin: 20px; color: #111; }
+	.container { max-width: 980px; margin: 0 auto; }
+	header { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:16px; }
+	h1 { font-size:1.2rem; margin:0; }
+	.controls { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+	input[type="search"], select, input[type="number"] { padding:6px 8px; border:1px solid #ccc; border-radius:6px; }
+	button { padding:6px 10px; border-radius:6px; border:1px solid #bbb; background:#f7f7f7; cursor:pointer; }
+	.results { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:12px; margin-top:12px; }
+	.card { border:1px solid #e0e0e0; padding:10px; border-radius:6px; background:#fff; }
+	.meta { font-size:0.85rem; color:#555; margin-top:6px; }
+	.small { font-size:0.85rem; color:#444; }
+	.toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+	.form-inline { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+	textarea { width:100%; min-height:60px; padding:6px; border-radius:6px; border:1px solid #ccc; }
+	.footer { margin-top:18px; color:#666; font-size:0.9rem; }
+	.count { font-weight:600; }
+	.hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="container">
+	<header>
+		<h1>Homebrew ROM Database</h1>
+		<div class="toolbar">
+			<button id="exportBtn">Export JSON</button>
+			<label style="display:inline-flex; gap:8px; align-items:center;">
+				<input id="importFile" type="file" accept="application/json" class="hidden">
+				<button id="importBtn">Import JSON</button>
+			</label>
+			<button id="resetBtn" title="Reset to sample data">Reset</button>
+		</div>
+	</header>
+
+	<div class="controls">
+		<input id="searchInput" type="search" placeholder="Search title, dev, description..." />
+		<select id="consoleSelect"><option value="">All consoles</option></select>
+		<input id="minYear" type="number" placeholder="Min year" style="width:110px" />
+		<input id="maxYear" type="number" placeholder="Max year" style="width:110px" />
+		<button id="clearFilters">Clear</button>
+	</div>
+
+	<div class="form-inline" style="margin-bottom:8px;">
+		<button id="addToggle">Add entry</button>
+		<span class="small">Results: <span id="resultCount" class="count">0</span></span>
+	</div>
+
+	<form id="addForm" class="hidden" onsubmit="return false;">
+		<div style="display:flex; gap:8px; flex-wrap:wrap;">
+			<input id="title" placeholder="Title" required>
+			<input id="console" placeholder="Console (e.g., NES, Genesis)" required>
+			<input id="year" type="number" placeholder="Year" style="width:110px" required>
+			<input id="developer" placeholder="Developer" >
+			<input id="downloadUrl" placeholder="Download URL (optional)" style="min-width:220px;">
+		</div>
+		<div style="margin-top:8px;">
+			<textarea id="description" placeholder="Short description"></textarea>
+		</div>
+		<div style="margin-top:8px; display:flex; gap:8px;">
+			<button id="addSave">Save</button>
+			<button id="addCancel" type="button">Cancel</button>
+		</div>
+	</form>
+
+	<section id="results" class="results" aria-live="polite"></section>
+
+	<div class="footer">
+		<p>Local-only demo: entries are stored in your browser's localStorage. Use Export/Import to transfer.</p>
+	</div>
+</div>
+
+<script>
+	// ...existing code...
+	// Sample data (keeps it small and legal)
+	const SAMPLE_DB = [
+		{ id: 1, title: "Solar Blaze", console: "NES", year: 2019, developer: "RetroDev", description: "Side-scrolling shooter homebrew.", downloadUrl: "" },
+		{ id: 2, title: "Pixel Quest", console: "Game Boy", year: 2021, developer: "IndieTeam", description: "An RPG made for old hardware.", downloadUrl: "" },
+		{ id: 3, title: "Mega Kart Homebrew", console: "Genesis", year: 2018, developer: "KartLab", description: "Arcade racing on classic console.", downloadUrl: "" },
+		{ id: 4, title: "StarForth", console: "NES", year: 2023, developer: "NewWave", description: "Platformer in the style of classic 8-bit.", downloadUrl: "" }
+	];
+
+	const STORAGE_KEY = 'homebrew_db_v1';
+	let db = loadDb();
+	let filters = { q: '', console: '', minYear: null, maxYear: null };
+
+	const el = {
+		search: document.getElementById('searchInput'),
+		consoleSelect: document.getElementById('consoleSelect'),
+		minYear: document.getElementById('minYear'),
+		maxYear: document.getElementById('maxYear'),
+		results: document.getElementById('results'),
+		resultCount: document.getElementById('resultCount'),
+		clearFilters: document.getElementById('clearFilters'),
+		exportBtn: document.getElementById('exportBtn'),
+		importBtn: document.getElementById('importBtn'),
+		importFile: document.getElementById('importFile'),
+		resetBtn: document.getElementById('resetBtn'),
+		addToggle: document.getElementById('addToggle'),
+		addForm: document.getElementById('addForm'),
+		addSave: document.getElementById('addSave'),
+		addCancel: document.getElementById('addCancel'),
+		title: document.getElementById('title'),
+		consoleInput: document.getElementById('console'),
+		year: document.getElementById('year'),
+		developer: document.getElementById('developer'),
+		downloadUrl: document.getElementById('downloadUrl'),
+		description: document.getElementById('description')
+	};
+
+	function loadDb() {
+		try {
+			const raw = localStorage.getItem(STORAGE_KEY);
+			if (raw) return JSON.parse(raw);
+		} catch (e) { /* ignore */ }
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(SAMPLE_DB));
+		return JSON.parse(JSON.stringify(SAMPLE_DB));
+	}
+
+	function saveDb() {
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+	}
+
+	function uniqueConsoles() {
+		const set = new Set(db.map(x => x.console).filter(Boolean));
+		return Array.from(set).sort();
+	}
+
+	function minMaxYear() {
+		const years = db.map(x => x.year).filter(y => Number.isFinite(y));
+		return { min: Math.min(...years), max: Math.max(...years) };
+	}
+
+	function renderConsoleOptions() {
+		const list = uniqueConsoles();
+		el.consoleSelect.innerHTML = '<option value="">All consoles</option>';
+		list.forEach(c => {
+			const opt = document.createElement('option'); opt.value = c; opt.textContent = c; el.consoleSelect.appendChild(opt);
+		});
+		// set year placeholders to data range
+		const {min, max} = minMaxYear();
+		if (Number.isFinite(min)) el.minYear.placeholder = min;
+		if (Number.isFinite(max)) el.maxYear.placeholder = max;
+	}
+
+	function matchesFilters(item) {
+		// text search
+		const q = filters.q.trim().toLowerCase();
+		if (q) {
+			const hay = (item.title + ' ' + (item.developer||'') + ' ' + (item.description||'')).toLowerCase();
+			if (!hay.includes(q)) return false;
+		}
+		if (filters.console && item.console !== filters.console) return false;
+		if (filters.minYear && item.year < filters.minYear) return false;
+		if (filters.maxYear && item.year > filters.maxYear) return false;
+		return true;
+	}
+
+	function renderResults() {
+		el.results.innerHTML = '';
+		const filtered = db.filter(matchesFilters).sort((a,b)=> (b.year||0)-(a.year||0));
+		el.resultCount.textContent = filtered.length;
+		if (!filtered.length) {
+			el.results.innerHTML = '<div class="small">No results.</div>';
+			return;
+		}
+		filtered.forEach(it => {
+			const div = document.createElement('div'); div.className = 'card';
+			div.innerHTML = `
+				<div><strong>${escapeHtml(it.title)}</strong></div>
+				<div class="meta">${escapeHtml(it.console)} • ${it.year || 'n/a'} • ${escapeHtml(it.developer || '')}</div>
+				<div class="small" style="margin-top:8px">${escapeHtml(it.description || '')}</div>
+				<div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+					${it.downloadUrl ? `<a href="${escapeAttr(it.downloadUrl)}" target="_blank">Download</a>` : ''}
+					<button data-id="${it.id}" class="delBtn">Delete</button>
+				</div>
+			`;
+			el.results.appendChild(div);
+		});
+		// attach delete handlers
+		document.querySelectorAll('.delBtn').forEach(b => {
+			b.addEventListener('click', ev => {
+				const id = Number(ev.currentTarget.dataset.id);
+				if (!confirm('Delete this entry?')) return;
+				db = db.filter(x => x.id !== id);
+				saveDb();
+				applyAndRender();
+			});
+		});
+	}
+
+	// utilities
+	function escapeHtml(s = '') { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+	function escapeAttr(s=''){ return s.replace(/"/g, '%22'); }
+
+	// events & behaviors
+	let searchTimer = null;
+	el.search.addEventListener('input', () => {
+		clearTimeout(searchTimer);
+		searchTimer = setTimeout(()=>{ filters.q = el.search.value; applyAndRender(); }, 200);
+	});
+	el.consoleSelect.addEventListener('change', () => { filters.console = el.consoleSelect.value; applyAndRender(); });
+	el.minYear.addEventListener('change', () => {
+		filters.minYear = el.minYear.value ? Number(el.minYear.value) : null;
+		applyAndRender();
+	});
+	el.maxYear.addEventListener('change', () => {
+		filters.maxYear = el.maxYear.value ? Number(el.maxYear.value) : null;
+		applyAndRender();
+	});
+	el.clearFilters.addEventListener('click', () => {
+		el.search.value = ''; el.consoleSelect.value = ''; el.minYear.value = ''; el.maxYear.value = '';
+		filters = { q: '', console: '', minYear: null, maxYear: null };
+		applyAndRender();
+	});
+	el.exportBtn.addEventListener('click', () => {
+		const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url; a.download = 'homebrew_db.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+	});
+	el.importBtn.addEventListener('click', () => el.importFile.click());
+	el.importFile.addEventListener('change', async (ev) => {
+		const f = ev.target.files && ev.target.files[0];
+		if (!f) return;
+		try {
+			const text = await f.text();
+			const parsed = JSON.parse(text);
+			if (!Array.isArray(parsed)) throw new Error('Invalid file format');
+			db = parsed.map((x, i) => ({ id: x.id || Date.now()+i, title: x.title||'', console: x.console||'', year: x.year||null, developer: x.developer||'', description: x.description||'', downloadUrl: x.downloadUrl||'' }));
+			saveDb();
+			applyAndRender();
+			alert('Imported ' + db.length + ' entries.');
+		} catch (e) {
+			alert('Import failed: ' + e.message);
+		}
+		ev.target.value = '';
+	});
+	el.resetBtn.addEventListener('click', () => {
+		if (!confirm('Reset local data to sample dataset?')) return;
+		db = JSON.parse(JSON.stringify(SAMPLE_DB));
+		saveDb();
+		applyAndRender();
+	});
+
+	// Add form behavior
+	el.addToggle.addEventListener('click', () => {
+		el.addForm.classList.toggle('hidden');
+	});
+	el.addCancel.addEventListener('click', () => {
+		el.addForm.classList.add('hidden');
+	});
+	el.addSave.addEventListener('click', () => {
+		const title = el.title.value.trim(); const c = el.consoleInput.value.trim();
+		const y = Number(el.year.value); if (!title || !c || !Number.isFinite(y)) { alert('please fill title, console, numeric year'); return; }
+		const newOne = {
+			id: Date.now(),
+			title,
+			console: c,
+			year: y,
+			developer: el.developer.value.trim(),
+			description: el.description.value.trim(),
+			downloadUrl: el.downloadUrl.value.trim()
+		};
+		db.push(newOne);
+		saveDb();
+		el.addForm.reset();
+		el.addForm.classList.add('hidden');
+		applyAndRender();
+	});
+
+	function applyAndRender() {
+		renderConsoleOptions();
+		renderResults();
+	}
+
+	// initial render
+	applyAndRender();
+</script>
+</body>
+</html>
