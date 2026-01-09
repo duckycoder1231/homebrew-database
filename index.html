@@ -359,4 +359,31 @@
 			}
 			el.addForm.reset(); el.addForm.classList.add('hidden');
 			await fetchGames();
-			if
+			if (publishNow) alert('Added and published.');
+			else alert('Submitted for review. An administrator must approve it before it appears publicly.');
+		} catch (err) {
+			alert('Add failed: ' + err.message);
+		} finally {
+			el.addSave.disabled = false;
+		}
+	});
+
+	// renderConsoleOptions: use visible entries (admins see pending as well)
+	function renderConsoleOptions() {
+		const list = (isAdmin ? db : db.filter(x => x.status === 'approved')).map(x => x.console).filter(Boolean);
+		const set = new Set(list);
+		const arr = Array.from(set).sort();
+		el.consoleSelect.innerHTML = '<option value="">All consoles</option>';
+		arr.forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.textContent = c; el.consoleSelect.appendChild(opt); });
+		const years = (isAdmin ? db : db.filter(x => x.status === 'approved')).map(x => x.year).filter(y => Number.isFinite(y));
+		if (years.length) { el.minYear.placeholder = Math.min(...years); el.maxYear.placeholder = Math.max(...years); }
+	}
+
+	function applyAndRender() { updateAdminUI(); renderConsoleOptions(); renderResults(); }
+
+	// initial load
+	updateAdminUI();
+	fetchGames();
+</script>
+</body>
+</html>
