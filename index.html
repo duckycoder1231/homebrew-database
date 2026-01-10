@@ -132,10 +132,12 @@
 	// demo admin token (DEMO ONLY). Replace with proper auth in a real app.
 	const ADMIN_TOKEN = 'admin-demo-token';
 
-	// helper to attach admin token header when present (server may require this)
+	// helper to attach admin token headers when present (support multiple server schemes)
 	function getAuthHeaders() {
 		const token = localStorage.getItem('adminToken');
-		return token ? { 'X-Admin-Token': token } : {};
+		if (!token) return {};
+		// include both header styles (server may expect either)
+		return { 'X-Admin-Token': token, 'Authorization': 'Bearer ' + token };
 	}
 
 	let isAdmin = false;
@@ -175,12 +177,26 @@
 				return;
 			}
 			const json = await res.json().catch(()=>null);
-			if (!Array.isArray(json)) {
+			// accept plain arrays or common wrapped shapes: { games: [...], data: [...], ... }
+			if (Array.isArray(json)) {
+				db = json;
+			} else if (json && typeof json === 'object') {
+				// prefer data/games, then any first array property
+				if (Array.isArray(json.data)) db = json.data;
+				else if (Array.isArray(json.games)) db = json.games;
+				else {
+					const arrProp = Object.keys(json).find(k => Array.isArray(json[k]));
+					if (arrProp) db = json[arrProp];
+					else {
+						console.error('Invalid response from /api/games', json);
+						alert('Invalid server response');
+						db = [];
+					}
+				}
+			} else {
 				console.error('Invalid response from /api/games', json);
 				alert('Invalid server response');
 				db = [];
-			} else {
-				db = json;
 			}
 			if (DEBUG) {
 				console.log('fetched DB:', db);
