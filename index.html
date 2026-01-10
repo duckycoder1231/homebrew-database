@@ -156,6 +156,14 @@
 		if (pendingSection) pendingSection.classList.toggle('hidden', !isAdmin);
 	}
 
+	// robust status check: support strings (case-insensitive) and booleans
+	function statusIs(item, want) {
+		const s = item && item.status;
+		if (typeof s === 'string') return s.toLowerCase() === String(want).toLowerCase();
+		if (typeof s === 'boolean') return (want === 'approved') ? s === true : s === false;
+		return false;
+	}
+
 	// fetch list from server (server supports filtering)
 	async function fetchGames() {
 		const params = new URLSearchParams();
@@ -181,10 +189,17 @@
 			if (Array.isArray(json)) {
 				db = json;
 			} else if (json && typeof json === 'object') {
-				// prefer data/games, then any first array property
-				if (Array.isArray(json.data)) db = json.data;
-				else if (Array.isArray(json.games)) db = json.games;
-				else {
+				// If server returns separate approved/pending arrays, prefer that shape
+				if (Array.isArray(json.approved) || Array.isArray(json.pending)) {
+					const approved = Array.isArray(json.approved) ? json.approved : [];
+					const pending = Array.isArray(json.pending) ? json.pending : [];
+					db = approved.concat(pending);
+				} else if (Array.isArray(json.data)) {
+					db = json.data;
+				} else if (Array.isArray(json.games)) {
+					db = json.games;
+				} else {
+					// fallback: take the first array-valued property if any
 					const arrProp = Object.keys(json).find(k => Array.isArray(json[k]));
 					if (arrProp) db = json[arrProp];
 					else {
@@ -198,6 +213,7 @@
 				alert('Invalid server response');
 				db = [];
 			}
+
 			if (DEBUG) {
 				console.log('fetched DB:', db);
 				const dbg = document.getElementById('debugInfo');
@@ -221,8 +237,8 @@
 	// render uses server-provided metadata; file downloads use /api/games/:id/file
 	function renderResults() {
 		el.results.innerHTML = '';
-		// approved entries shown to everyone
-		const approved = db.slice().filter(it => it.status === 'approved').sort((a,b)=> (b.year||0)-(a.year||0));
+		// approved entries shown to everyone (robust status check)
+		const approved = db.slice().filter(it => statusIs(it, 'approved')).sort((a,b)=> (b.year||0)-(a.year||0));
 		el.resultCount.textContent = approved.length;
 		if (!approved.length) { el.results.innerHTML = '<div class="small">No results.</div>'; }
 		approved.forEach(it => {
@@ -258,7 +274,7 @@
 		const pendingEl = document.getElementById('pendingSection');
 		if (!pendingEl) return;
 		if (!isAdmin) { pendingEl.classList.add('hidden'); return; }
-		const pending = db.slice().filter(it => it.status === 'pending').sort((a,b)=> (b.year||0)-(a.year||0));
+		const pending = db.slice().filter(it => statusIs(it, 'pending')).sort((a,b)=> (b.year||0)-(a.year||0));
 		if (!pending.length) { pendingEl.innerHTML = '<div class="small">No pending submissions.</div>'; pendingEl.classList.remove('hidden'); return; }
 		pendingEl.innerHTML = '';
 		pending.forEach(it => {
